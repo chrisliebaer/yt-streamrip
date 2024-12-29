@@ -28,6 +28,11 @@ CURRENT_VERSION_FILE="${CURRENT_VERSION_FILE:-/ytarchive_version.txt}"
 GITHUB_OWNER="${GITHUB_OWNER:-Kethsar}"
 GITHUB_REPO="${GITHUB_REPO:-ytarchive}"
 
+function _term() {
+	echo "Caught SIGTERM, exiting"
+	kill -TERM "$child" 2>/dev/null
+}
+
 function send_discord_message() {
 	if [ -z "$DISCORD_WEBHOOK_URL" ]; then
 		# no webhook URL provided, do nothing
@@ -110,6 +115,9 @@ function install_or_update_ytarchive() {
 
 function watcher_loop() {
 
+	# install trap in order to catch docker stop signals
+	trap _term SIGTERM INT
+
 	ytarchive_args=(
 		# always download entire VOD
 		--live-from 0
@@ -117,15 +125,15 @@ function watcher_loop() {
 		# mux into mkv instead of random bullshit
 		--mkv
 
-		# store staging files in different directory so they don't get picked up by other services
-		--temporary-dir "$YTARCHIVE_DOWNLOAD_LOCATION"
-
 		# keep monitoring for live streams (causes ytarchive to run forever)
-		--monitor-channel
-		--retry-stream "$YTARCHIVE_RETRY_INTERVAL"
+		# we can't use this, because ytarchive will move all files to the finalized location, before merging
+		# this creates a situation during which partially written files become visible to other services
+		##--monitor-channel
+		##--retry-stream "$YTARCHIVE_RETRY_INTERVAL"
+		#--temporary-dir "$YTARCHIVE_DOWNLOAD_LOCATION"
 
-		# output template is not very powerfull, but only way to use the atomic move semantic from ytarchive
-		--output "$YTARCHIVE_FINALIZED_LOCATION/%(title)s(%(id)s)"
+		# output template is not very powerfull, but we can rename the file later
+		--output "$YTARCHIVE_DOWNLOAD_LOCATION/%(title)s(%(id)s)"
 
 		# always finalize the download, even if interrupted
 		--merge
@@ -176,20 +184,6 @@ function watcher_loop() {
 		echo "Skipping sleep because DEV is true"
 	fi
 
-	# check if ytarchive has an update
-	if [ "$NO_INSTALL_OR_UPDATE" != "true" ]; then
-		install_or_update_ytarchive
-	else
-		echo "Skipping install or update of ytarchive because NO_INSTALL_OR_UPDATE is set to true"
-	fi
-	ytarchive="${INSTALL_LOCATION}/ytarchive"
-
-	# ensure ytarchive is properly installed
-	if [ ! -x "$ytarchive" ]; then
-		echo "ytarchive is not installed or not executable, exiting"
-		exit 1
-	fi
-
 	# ensure download and finalized directories exist
 	mkdir -p "$YTARCHIVE_DOWNLOAD_LOCATION"
 	mkdir -p "$YTARCHIVE_FINALIZED_LOCATION"
@@ -205,9 +199,58 @@ function watcher_loop() {
 		fi
 	fi
 
-	# ytarchive is going to run forever and needs to respond to signals, so we exec it
-	# this will also get rid of our traps, but I don't have a better solution right now
-	exec $ytarchive "${ytarchive_args[@]}"
+	# do periodic updates of ytarchive and keep track of last time we checked
+	LAST_UPDATE_CHECK="0"
+
+	# since the monitoring feature of ytarchive is unsuitable for our use case, we need to run ytarchive in a loop
+	while true; do
+
+		# if more than a day has passed since the last update check, check for updates
+		if [ $(( $(date +%s) - LAST_UPDATE_CHECK )) -gt 86400 ]; then
+			echo "Haven't checked for updates for ytarchive in over a day, checking now"
+
+			# check if ytarchive has an update
+			if [ "$NO_INSTALL_OR_UPDATE" != "true" ]; then
+				install_or_update_ytarchive
+			else
+				echo "Skipping install or update of ytarchive because NO_INSTALL_OR_UPDATE is set to true"
+			fi
+			ytarchive="${INSTALL_LOCATION}/ytarchive"
+			LAST_UPDATE_CHECK=$(date +%s)
+		fi
+
+		# ytarchive always reports an error if there is no livestream, making it's exit code unusable
+		$ytarchive "${ytarchive_args[@]}" &
+		ytarchive_pid=$!
+
+		# wait for process to finish (ignore exit code, since it's unusable)
+		if wait $ytarchive_pid; then
+			echo "ytarchive exited cleanly, new live stream recorded"
+		else
+			echo "ytarchive exited with an error, waiting $YTARCHIVE_RETRY_INTERVAL seconds before retrying"
+		fi
+		
+
+		# move all files from the download location to the finalized location (filter for relevant extensions)
+		# if we would have to move files cross-device, we would have to copy them instead
+		# we don't want other services to pick up partially written files, so we move them to a temporary name first
+		for file in "$YTARCHIVE_DOWNLOAD_LOCATION"/*.{mkv,webm,mp4}; do
+			if [ -f "$file" ]; then
+				base_file="$(basename "$file")"
+
+				target_file="$YTARCHIVE_FINALIZED_LOCATION/$base_file"
+
+				# move the file to a temporary name
+				mv "$file" "$target_file.tmp"
+
+				# then rename the file to remove the .tmp extension
+				mv "$target_file.tmp" "$target_file"
+
+				echo "Discovered new file: $base_file"
+			fi
+		done
+		sleep "$YTARCHIVE_RETRY_INTERVAL"
+	done
 }
 
 
