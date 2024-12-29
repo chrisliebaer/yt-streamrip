@@ -246,7 +246,8 @@ function watcher_loop() {
 				# then rename the file to remove the .tmp extension
 				mv "$target_file.tmp" "$target_file"
 
-				echo "Discovered new file: $base_file"
+				echo "finished new stream recording: $base_file"
+				send_discord_message "Finished new stream recording for channel @$WATCH_TARGET: $base_file (size: $(du -h "$target_file" | cut -f1))"
 			fi
 		done
 		sleep "$YTARCHIVE_RETRY_INTERVAL"
