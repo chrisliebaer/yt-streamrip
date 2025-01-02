@@ -1,3 +1,7 @@
+FROM scratch as ASSEMBLER
+COPY pipeline /pipeline
+COPY desilence/desilence.py /pipeline/desilence.py
+
 # as long as we don't need fancy ffmpeg builds, we can use the alpine image
 FROM alpine
 
@@ -5,16 +9,21 @@ RUN apk add --no-cache \
 	bash \
 	curl \
 	jq \
+	python3 \
 	ffmpeg
 
-# these are defaults more suitable for a container
-ENV YTARCHIVE_DOWNLOAD_LOCATION="/downloads/tmp"
-ENV YTARCHIVE_FINALIZED_LOCATION="/downloads/final"
-ENV YTARCHIVE_CLEANUP_DOWNLOADS="true"
+COPY --chmod=755 --from=ASSEMBLER /pipeline /opt/pipeline
 
-COPY --chmod=755 entrypoint.sh /entrypoint.sh
+# prepare user for running the pipeline and create directories so volumes have proper permissions
+RUN addgroup -g 1000 pipeline && \
+	adduser -D -u 1000 -G pipeline pipeline && \
+	mkdir -p /opt/pipeline/workdir/archive_tmp && \
+	mkdir -p /opt/pipeline/workdir/archive_done && \
+	mkdir -p /opt/pipeline/workdir/convert_tmp && \
+	mkdir -p /opt/pipeline/workdir/convert_done && \
+	chown -R pipeline:pipeline /opt/pipeline/workdir
 
-# TODO: create less privileged user (and make sure ids can be set via env vars)
-# TODO: requires writeable location for binary and version file
+USER pipeline
+WORKDIR /opt/pipeline/workdir
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/opt/pipeline/entrypoint.sh"]

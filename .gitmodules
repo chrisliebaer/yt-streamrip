@@ -1,0 +1,3 @@
+[submodule "desilence"]
+	path = desilence
+	url = git@github.com:chrisliebaer/desilence.git

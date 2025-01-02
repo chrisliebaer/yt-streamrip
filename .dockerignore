@@ -1,0 +1,7 @@
+.git
+
+# ignored by git, but boi do we never want this in the image
+.env
+
+# might contain large videos from development process
+/dev
