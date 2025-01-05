@@ -88,7 +88,7 @@ function watch_dir() {
 
 		for file in "$DIR_ARCHIVE_DONE"/*.{mkv,mp4,webm}; do
 			if [ -f "$file" ]; then
-				send_discord_message "New file detected: $(basename "$file")"
+				echo "New file detected: $(basename "$file")"
 				handle_new_file "$file"
 			fi
 		done
