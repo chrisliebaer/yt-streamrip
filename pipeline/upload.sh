@@ -14,7 +14,7 @@ done
 WEBDAV_HOST=${WEBDAV_HOST%/}
 
 # small sleep in case path does exist, and we spam the server
-sleep 10s
+sleep "$WATCH_INTERVAL"
 
 # watch for new files passing through the pipeline
 while [ "$DO_WORK" = true ]; do
