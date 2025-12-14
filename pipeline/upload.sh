@@ -18,6 +18,9 @@ sleep "$WATCH_INTERVAL"
 
 # watch for new files passing through the pipeline
 while [ "$DO_WORK" = true ]; do
+	# Clear log file for the new iteration
+	: > "$LOG_FILE"
+
 	for file in "$DIR_CONVERT_DONE"/*.{mkv,mp4,webm}; do
 		if [ -f "$file" ]; then
 			filename=$(basename "$file")

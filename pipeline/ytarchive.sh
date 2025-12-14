@@ -149,6 +149,8 @@ function watcher_loop() {
 
 	# since the monitoring feature of ytarchive is unsuitable for our use case, we need to run ytarchive in a loop
 	while [ "$DO_WORK" = true ]; do
+		# Clear log file for the new iteration
+		: > "$LOG_FILE"
 
 		# if more than a day has passed since the last update check, check for updates
 		if [ $(( $(date +%s) - LAST_UPDATE_CHECK )) -gt 86400 ]; then

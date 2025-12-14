@@ -1,6 +1,8 @@
 #!/bin/bash
 
 set -e
+set -o pipefail
+set -o errtrace  # Ensure traps are inherited by functions and sourced scripts
 
 # if an .env file is present, source it (for local development)
 if [ -f .env ]; then
@@ -37,6 +39,12 @@ export YTARCHIVE_INSTALL_DIR="${DIR_BASE}/ytarchive"
 export YTARCHIVE_VERSION_FILE="${DIR_BASE}/ytarchive_version.txt"
 
 export WATCH_INTERVAL="${WATCH_INTERVAL:-5m}"
+
+# Setup logging
+export LOG_FILE="/tmp/pipeline.log"
+touch "$LOG_FILE"
+# Redirect stdout and stderr to the log file, while also keeping them on stdout/stderr
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 function make_dirs() {
 	mkdir -p "$DIR_BASE"
@@ -78,6 +86,7 @@ trap 'signal_handler SIGTERM' TERM
 trap 'signal_handler SIGHUP' HUP
 
 function send_discord_message() {
+	echo "Sending discord message: $1" >&2
 	if [ -z "$DISCORD_WEBHOOK_URL" ]; then
 		# no webhook URL provided, do nothing
 		return
@@ -97,11 +106,25 @@ fi
 
 make_dirs
 
-# trap any errors and send them to discord
-trap 'send_discord_message "ytarchive watcher encountered an unexpected error code \`$?\` running \`$BASH_COMMAND\`
+function handle_error() {
+	local exit_code="${1:-$?}"
+	local cmd="${2:-$BASH_COMMAND}"
+	# Truncate cmd
+	cmd=$(echo "$cmd" | head -c 200)
+	
+	send_discord_message "ytarchive watcher encountered an unexpected error code \`$exit_code\` running \`$cmd\`
 caller context:
 \`\`\`
-$(caller)\`\`\`"' ERR
+$(caller)\`\`\`
+Last 20 lines of log:
+\`\`\`
+$(tail -n 20 "$LOG_FILE" | sed "s/\`/'\''/g" | head -c 1000)
+\`\`\`"
+}
+
+# trap any errors and send them to discord
+trap 'handle_error' ERR
 
 # source instead of running, to keep scope and trap handlers
+# shellcheck disable=SC1090
 source "${SCRIPT_DIR}/$1.sh"
